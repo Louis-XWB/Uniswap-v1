@@ -66,6 +66,16 @@ Uniswap V1 是该协议的第一个版本，于 2018 年 11 月推出，设计�
     当流动性提供者想要退出并取回他们的资金时，他们可以销毁他们的池代币，并按比例提取储备金，这时他们也会获得这部分奖励。
 
 
+## Code Learning
+
+### [uniswap_exchange.vy](https://github.com/Louis-XWB/Uniswap-v1/blob/master/contracts/uniswap_exchange.vy)
+
+* [addLiquidity](https://github.com/Louis-XWB/Uniswap-v1/blob/4804e4e3c3a430e53fa5ce19ff89c54cfaa1a35b/contracts/uniswap_exchange.vy#L59)
+
+* [removeLiquidity](https://github.com/Louis-XWB/Uniswap-v1/blob/4804e4e3c3a430e53fa5ce19ff89c54cfaa1a35b/contracts/uniswap_exchange.vy#L142)
+
+
+
 ## FAQ
 1) Uniswap 的前端展示创建的 Token 信息是从哪里获取的？
   
