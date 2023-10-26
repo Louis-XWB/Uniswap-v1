@@ -2,7 +2,7 @@
 # @notice Source code found at https://github.com/uniswap
 # @notice Use at your own risk
 
-# Factory 合约
+# Uniswap Factory 合约
 contract Factory():
     # 获取交易对地址
     def getExchange(token_addr: address) -> address: constant
