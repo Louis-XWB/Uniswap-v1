@@ -78,7 +78,7 @@ Uniswap V1 是该协议的第一个版本，于 2018 年 11 月推出，设计�
 ## FAQ
 1) Uniswap 的前端展示创建的 Token 信息是从哪里获取的？
   
-    代币信息（包括名称、符号、小数点等）直接从代币合约中提取。图标是从 TrustWallet 中提取的，所以如果想更新代币图标，可以向 TrustWallet 的github repo https://github.com/trustwallet/assets 提交PR。
+    代币信息（包括名称、符号、小数点等）直接从代币合约中提取。图标是从 TrustWallet 中提取的，所以如果想更新代币图标，可以向 TrustWallet [repo](https://github.com/trustwallet/assets) 提交PR。
 
 
 
