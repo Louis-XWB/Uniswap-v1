@@ -75,7 +75,6 @@ Uniswap V1 是该协议的第一个版本，于 2018 年 11 月推出，设计�
 * [removeLiquidity](https://github.com/Louis-XWB/Uniswap-v1/blob/4804e4e3c3a430e53fa5ce19ff89c54cfaa1a35b/contracts/uniswap_exchange.vy#L142)
 
 
-
 ## FAQ
 1) Uniswap 的前端展示创建的 Token 信息是从哪里获取的？
   
