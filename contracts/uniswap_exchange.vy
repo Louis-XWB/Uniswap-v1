@@ -174,25 +174,42 @@ def removeLiquidity(amount: uint256, min_eth: uint256(wei), min_tokens: uint256,
     # 返回移除的ETH和token数量
     return eth_amount, token_amount
 
-# @dev Pricing function for converting between ETH and Tokens.
-# @param input_amount Amount of ETH or Tokens being sold.
-# @param input_reserve Amount of ETH or Tokens (input type) in exchange reserves.
-# @param output_reserve Amount of ETH or Tokens (output type) in exchange reserves.
-# @return Amount of ETH or Tokens bought.
+# 用于计算最终所兑换出来的币（ETH或代币）的数量，
+# 输入为两个币的储备量和用于兑换的币的数量，输出为能够兑换出来的币的数量。
+#
+# 计算过程：
+# Uniswap使用的是恒定做市商，即xy=k，(x+x')(y-y')=k。
+# 这里x=input_reserve，x'=input_amount，y=output_reserve
+# 此函数计算方式为：(input_reserve+input_amount)(output_reserve-output_amount)=k -> 求output_amount
+# (input_reserve+input_amount)(output_reserve-output_amount) = input_reserve*output_reserve
+# input_reserve*output_reserve + input_amount*output_reserve - input_reserve*output_amount - input_amount*output_amount = input_reserve*output_reserve
+# input_amount*output_reserve - input_reserve*output_amount - input_amount*output_amount = 0
+# input_amount*output_reserve - input_amount*output_amount = input_reserve*output_amount
+# input_amount*output_reserve = input_amount*output_amount + input_reserve*output_amount
+# input_amount*output_reserve = output_amount*(input_amount + input_reserve)
+# output_amount = input_amount*output_reserve / (input_amount + input_reserve)
+# 返回值即是 output_amount
 @private
 @constant
 def getInputPrice(input_amount: uint256, input_reserve: uint256, output_reserve: uint256) -> uint256:
+    # 确定 ETH 和 Token 的储备量都大于0
     assert input_reserve > 0 and output_reserve > 0
+
+    # 计算扣除0.3%手续费后剩余的数量
     input_amount_with_fee: uint256 = input_amount * 997
+
+    # 计算输出数量output_amount
     numerator: uint256 = input_amount_with_fee * output_reserve
     denominator: uint256 = (input_reserve * 1000) + input_amount_with_fee
     return numerator / denominator
 
-# @dev Pricing function for converting between ETH and Tokens.
-# @param output_amount Amount of ETH or Tokens being bought.
-# @param input_reserve Amount of ETH or Tokens (input type) in exchange reserves.
-# @param output_reserve Amount of ETH or Tokens (output type) in exchange reserves.
-# @return Amount of ETH or Tokens sold.
+# 与getInputPrice函数一样，指定output_amount，返回input_amount，计算的过程中需要收取0.3%手续费
+# 
+# +1 加了个1，这是因为uint256的除法会产生浮点数，向下取整后小数会被舍去，因此兑换者实际需要支付的代币数量会比理论上少一点。
+# 为了避免每次交易后交易所产生亏损（会导致流动性池内资金越来越少），因此在最后的计算结果手动加1向上取整，
+# 不过因为结算单位是wei，所以向上取整给用户带来的损失可以忽略不计。
+#
+# 返回值即是 input_amount
 @private
 @constant
 def getOutputPrice(output_amount: uint256, input_reserve: uint256, output_reserve: uint256) -> uint256:
@@ -201,294 +218,249 @@ def getOutputPrice(output_amount: uint256, input_reserve: uint256, output_reserv
     denominator: uint256 = (output_reserve - output_amount) * 997
     return numerator / denominator + 1
 
+# 根据输入的ETH计算可以交易到的Token数量
 @private
 def ethToTokenInput(eth_sold: uint256(wei), min_tokens: uint256, deadline: timestamp, buyer: address, recipient: address) -> uint256:
     assert deadline >= block.timestamp and (eth_sold > 0 and min_tokens > 0)
+
+    # 计算token的储备量
     token_reserve: uint256 = self.token.balanceOf(self)
+
+    # 计算可以交易到的token数量
     tokens_bought: uint256 = self.getInputPrice(as_unitless_number(eth_sold), as_unitless_number(self.balance - eth_sold), token_reserve)
+    
+    # eth_sold: 售卖eth_sold的数量，返回值是用户应该获得的token数量
+    # (self.balance - eth_sold):交易是先转账再执行合约，所以获得ETH储备量的时候需要先减去该买者已经发送的ETH数量.
     assert tokens_bought >= min_tokens
+
+    # 向用户发送token，完成兑换
     assert self.token.transfer(recipient, tokens_bought)
     log.TokenPurchase(buyer, eth_sold, tokens_bought)
     return tokens_bought
 
-# @notice Convert ETH to Tokens.
-# @dev User specifies exact input (msg.value).
-# @dev User cannot specify minimum output or deadline.
+# 用ETH兑换代币的默认函数，用户只需要指定输入的ETH的数量
 @public
 @payable
 def __default__():
     self.ethToTokenInput(msg.value, 1, block.timestamp, msg.sender, msg.sender)
 
-# @notice Convert ETH to Tokens.
-# @dev User specifies exact input (msg.value) and minimum output.
-# @param min_tokens Minimum Tokens bought.
-# @param deadline Time after which this transaction can no longer be executed.
-# @return Amount of Tokens bought.
+# 将ETH兑换成目标代币，通过msg.value指定输入的ETH数量
 @public
 @payable
 def ethToTokenSwapInput(min_tokens: uint256, deadline: timestamp) -> uint256:
     return self.ethToTokenInput(msg.value, min_tokens, deadline, msg.sender, msg.sender)
 
-# @notice Convert ETH to Tokens and transfers Tokens to recipient.
-# @dev User specifies exact input (msg.value) and minimum output
-# @param min_tokens Minimum Tokens bought.
-# @param deadline Time after which this transaction can no longer be executed.
-# @param recipient The address that receives output Tokens.
-# @return Amount of Tokens bought.
+# 将ETH兑换成目标代币，指定接收地址
 @public
 @payable
 def ethToTokenTransferInput(min_tokens: uint256, deadline: timestamp, recipient: address) -> uint256:
     assert recipient != self and recipient != ZERO_ADDRESS
     return self.ethToTokenInput(msg.value, min_tokens, deadline, msg.sender, recipient)
 
+# 根据目标token数量把给定的ETH转换成Token
 @private
 def ethToTokenOutput(tokens_bought: uint256, max_eth: uint256(wei), deadline: timestamp, buyer: address, recipient: address) -> uint256(wei):
     assert deadline >= block.timestamp and (tokens_bought > 0 and max_eth > 0)
+
+    # 计算token的储备量
     token_reserve: uint256 = self.token.balanceOf(self)
+
+    # 用getOutputPrice获得所需支付的ETH数量
+    # 因为交易是先转账再执行合约代码，所以调用该合约时ETH已经转到兑换合约中，
+    # 而入口函数会直接将msg.value作为max_eth传入，所以ETH储备量为self.balance-max_eth
     eth_sold: uint256 = self.getOutputPrice(tokens_bought, as_unitless_number(self.balance - max_eth), token_reserve)
     # Throws if eth_sold > max_eth
+    # 计算需要退还给用户的ETH数量
     eth_refund: uint256(wei) = max_eth - as_wei_value(eth_sold, 'wei')
+
+    # 如果需要退还给用户的ETH数量大于0，则转账ETH给用户
     if eth_refund > 0:
         send(buyer, eth_refund)
+    
+    # 向用户发送token，完成兑换
     assert self.token.transfer(recipient, tokens_bought)
     log.TokenPurchase(buyer, as_wei_value(eth_sold, 'wei'), tokens_bought)
     return as_wei_value(eth_sold, 'wei')
 
-# @notice Convert ETH to Tokens.
-# @dev User specifies maximum input (msg.value) and exact output.
-# @param tokens_bought Amount of tokens bought.
-# @param deadline Time after which this transaction can no longer be executed.
-# @return Amount of ETH sold.
+# 指定输出的token数量，把msg.value指定为最大的ETH数量，兑换成token
 @public
 @payable
 def ethToTokenSwapOutput(tokens_bought: uint256, deadline: timestamp) -> uint256(wei):
     return self.ethToTokenOutput(tokens_bought, msg.value, deadline, msg.sender, msg.sender)
 
-# @notice Convert ETH to Tokens and transfers Tokens to recipient.
-# @dev User specifies maximum input (msg.value) and exact output.
-# @param tokens_bought Amount of tokens bought.
-# @param deadline Time after which this transaction can no longer be executed.
-# @param recipient The address that receives output Tokens.
-# @return Amount of ETH sold.
+# 指定输出的token数量，把msg.value指定为最大的ETH数量，兑换成token，并转给指定地址
 @public
 @payable
 def ethToTokenTransferOutput(tokens_bought: uint256, deadline: timestamp, recipient: address) -> uint256(wei):
     assert recipient != self and recipient != ZERO_ADDRESS
     return self.ethToTokenOutput(tokens_bought, msg.value, deadline, msg.sender, recipient)
 
+# 类似ETH->Token的兑换，只是这里是Token->ETH
+# 根据要卖出的Token数量计算可以得到的ETH数量，完成兑换
 @private
 def tokenToEthInput(tokens_sold: uint256, min_eth: uint256(wei), deadline: timestamp, buyer: address, recipient: address) -> uint256(wei):
     assert deadline >= block.timestamp and (tokens_sold > 0 and min_eth > 0)
+    # 计算token的储备量
     token_reserve: uint256 = self.token.balanceOf(self)
+
+    # 计算可以交易到的ETH数量
     eth_bought: uint256 = self.getInputPrice(tokens_sold, token_reserve, as_unitless_number(self.balance))
+    # 将单位转换成we
     wei_bought: uint256(wei) = as_wei_value(eth_bought, 'wei')
+    # 确保可以交易到的ETH数量大于最小数量
     assert wei_bought >= min_eth
+    # 向用户发送ETH，完成兑换
     send(recipient, wei_bought)
+    # 将卖出的Token从用户转移到本合约
     assert self.token.transferFrom(buyer, self, tokens_sold)
     log.EthPurchase(buyer, tokens_sold, wei_bought)
     return wei_bought
 
 
-# @notice Convert Tokens to ETH.
-# @dev User specifies exact input and minimum output.
-# @param tokens_sold Amount of Tokens sold.
-# @param min_eth Minimum ETH purchased.
-# @param deadline Time after which this transaction can no longer be executed.
-# @return Amount of ETH bought.
+# 指定输入的代币数量，根据代币数量兑换ETH并发送给消息调用者
 @public
 def tokenToEthSwapInput(tokens_sold: uint256, min_eth: uint256(wei), deadline: timestamp) -> uint256(wei):
     return self.tokenToEthInput(tokens_sold, min_eth, deadline, msg.sender, msg.sender)
 
-# @notice Convert Tokens to ETH and transfers ETH to recipient.
-# @dev User specifies exact input and minimum output.
-# @param tokens_sold Amount of Tokens sold.
-# @param min_eth Minimum ETH purchased.
-# @param deadline Time after which this transaction can no longer be executed.
-# @param recipient The address that receives output ETH.
-# @return Amount of ETH bought.
+# 指定输入的代币数量和指定地址，根据代币数量兑换ETH并发送给指定地址
 @public
 def tokenToEthTransferInput(tokens_sold: uint256, min_eth: uint256(wei), deadline: timestamp, recipient: address) -> uint256(wei):
     assert recipient != self and recipient != ZERO_ADDRESS
     return self.tokenToEthInput(tokens_sold, min_eth, deadline, msg.sender, recipient)
 
+# 指定所想要兑换到的ETH数量并将ETH发送给消息调用者，函数根据要兑换的ETH计算扣除代币
 @private
 def tokenToEthOutput(eth_bought: uint256(wei), max_tokens: uint256, deadline: timestamp, buyer: address, recipient: address) -> uint256:
     assert deadline >= block.timestamp and eth_bought > 0
+
+    # 计算token的储备量
     token_reserve: uint256 = self.token.balanceOf(self)
+
+    # 计算想要兑换到的ETH数量所要支付的token数量
     tokens_sold: uint256 = self.getOutputPrice(as_unitless_number(eth_bought), token_reserve, as_unitless_number(self.balance))
     # tokens sold is always > 0
+    # 确保支付的token数量小于最大数量
     assert max_tokens >= tokens_sold
+
+    # 向用户发送ETH，完成兑换
     send(recipient, eth_bought)
+    # 将兑换的Token从用户转移到本合约
     assert self.token.transferFrom(buyer, self, tokens_sold)
     log.EthPurchase(buyer, tokens_sold, eth_bought)
     return tokens_sold
 
-# @notice Convert Tokens to ETH.
-# @dev User specifies maximum input and exact output.
-# @param eth_bought Amount of ETH purchased.
-# @param max_tokens Maximum Tokens sold.
-# @param deadline Time after which this transaction can no longer be executed.
-# @return Amount of Tokens sold.
+# 指定所想要兑换到的ETH数量并将ETH发送给消息调用者，函数根据要兑换的ETH计算扣除代币
 @public
 def tokenToEthSwapOutput(eth_bought: uint256(wei), max_tokens: uint256, deadline: timestamp) -> uint256:
     return self.tokenToEthOutput(eth_bought, max_tokens, deadline, msg.sender, msg.sender)
 
-# @notice Convert Tokens to ETH and transfers ETH to recipient.
-# @dev User specifies maximum input and exact output.
-# @param eth_bought Amount of ETH purchased.
-# @param max_tokens Maximum Tokens sold.
-# @param deadline Time after which this transaction can no longer be executed.
-# @param recipient The address that receives output ETH.
-# @return Amount of Tokens sold.
+# 指定所想要兑换到的ETH数量并将ETH发送给指定地址，函数根据要兑换的ETH计算扣除代币
 @public
 def tokenToEthTransferOutput(eth_bought: uint256(wei), max_tokens: uint256, deadline: timestamp, recipient: address) -> uint256:
     assert recipient != self and recipient != ZERO_ADDRESS
     return self.tokenToEthOutput(eth_bought, max_tokens, deadline, msg.sender, recipient)
 
+# 实现ERC20 -> ERC20的兑换
+# 在将支付代币兑换成ETH后，就将ETH发送到目标代币的兑换合约地址，
+# 并调用其ethToTokenTransferInput函数来将ETH兑换成目标代币。
 @private
 def tokenToTokenInput(tokens_sold: uint256, min_tokens_bought: uint256, min_eth_bought: uint256(wei), deadline: timestamp, buyer: address, recipient: address, exchange_addr: address) -> uint256:
     assert (deadline >= block.timestamp and tokens_sold > 0) and (min_tokens_bought > 0 and min_eth_bought > 0)
+    # 确保交易对地址不是本合约地址和零地址
     assert exchange_addr != self and exchange_addr != ZERO_ADDRESS
+
+    # 计算token的储备量
     token_reserve: uint256 = self.token.balanceOf(self)
+    # 计算可以交易到的ETH数量
     eth_bought: uint256 = self.getInputPrice(tokens_sold, token_reserve, as_unitless_number(self.balance))
     wei_bought: uint256(wei) = as_wei_value(eth_bought, 'wei')
     assert wei_bought >= min_eth_bought
+
+    # 把用户要对话的Token转移到本合约
     assert self.token.transferFrom(buyer, self, tokens_sold)
+
+    # 向目标交易对合约地址发送ETH，并调用其ethToTokenTransferInput函数
+    # 把ETH兑换成目标代币，并转给指定地址，完成兑换
     tokens_bought: uint256 = Exchange(exchange_addr).ethToTokenTransferInput(min_tokens_bought, deadline, recipient, value=wei_bought)
     log.EthPurchase(buyer, tokens_sold, wei_bought)
     return tokens_bought
 
-# @notice Convert Tokens (self.token) to Tokens (token_addr).
-# @dev User specifies exact input and minimum output.
-# @param tokens_sold Amount of Tokens sold.
-# @param min_tokens_bought Minimum Tokens (token_addr) purchased.
-# @param min_eth_bought Minimum ETH purchased as intermediary.
-# @param deadline Time after which this transaction can no longer be executed.
-# @param token_addr The address of the token being purchased.
-# @return Amount of Tokens (token_addr) bought.
+# 根据指定的token 地址，将本合约的token兑换成token_addr的token
 @public
 def tokenToTokenSwapInput(tokens_sold: uint256, min_tokens_bought: uint256, min_eth_bought: uint256(wei), deadline: timestamp, token_addr: address) -> uint256:
     exchange_addr: address = self.factory.getExchange(token_addr)
     return self.tokenToTokenInput(tokens_sold, min_tokens_bought, min_eth_bought, deadline, msg.sender, msg.sender, exchange_addr)
 
-# @notice Convert Tokens (self.token) to Tokens (token_addr) and transfers
-#         Tokens (token_addr) to recipient.
-# @dev User specifies exact input and minimum output.
-# @param tokens_sold Amount of Tokens sold.
-# @param min_tokens_bought Minimum Tokens (token_addr) purchased.
-# @param min_eth_bought Minimum ETH purchased as intermediary.
-# @param deadline Time after which this transaction can no longer be executed.
-# @param recipient The address that receives output ETH.
-# @param token_addr The address of the token being purchased.
-# @return Amount of Tokens (token_addr) bought.
+# 根据指定的token 地址，将本合约的token兑换成token_addr的token，并转给指定地址
 @public
 def tokenToTokenTransferInput(tokens_sold: uint256, min_tokens_bought: uint256, min_eth_bought: uint256(wei), deadline: timestamp, recipient: address, token_addr: address) -> uint256:
     exchange_addr: address = self.factory.getExchange(token_addr)
     return self.tokenToTokenInput(tokens_sold, min_tokens_bought, min_eth_bought, deadline, msg.sender, recipient, exchange_addr)
 
+# 根据指定的token 地址和指定购买的目标token数量，将本合约的token兑换成token_addr的token
 @private
 def tokenToTokenOutput(tokens_bought: uint256, max_tokens_sold: uint256, max_eth_sold: uint256(wei), deadline: timestamp, buyer: address, recipient: address, exchange_addr: address) -> uint256:
     assert deadline >= block.timestamp and (tokens_bought > 0 and max_eth_sold > 0)
+
+    # 确保交易对地址不是本合约地址和零地址
     assert exchange_addr != self and exchange_addr != ZERO_ADDRESS
+
+    # 计算购买指定数量的token所需支付的ETH数量
     eth_bought: uint256(wei) = Exchange(exchange_addr).getEthToTokenOutputPrice(tokens_bought)
+
+    # 计算卖出token的数量
     token_reserve: uint256 = self.token.balanceOf(self)
+
+    # 根据购买目标token所需的ETH数量，计算需要卖出的token数量
     tokens_sold: uint256 = self.getOutputPrice(as_unitless_number(eth_bought), token_reserve, as_unitless_number(self.balance))
     # tokens sold is always > 0
+    # 确保卖出的token数量小于最大数量
     assert max_tokens_sold >= tokens_sold and max_eth_sold >= eth_bought
+
+    # 把用户要卖出的Token转移到本合约
     assert self.token.transferFrom(buyer, self, tokens_sold)
+
+    # 向目标交易对合约地址发送ETH，并调用其ethToTokenTransferInput函数
+    # 把ETH兑换成目标代币，并转给指定地址，完成兑换
     eth_sold: uint256(wei) = Exchange(exchange_addr).ethToTokenTransferOutput(tokens_bought, deadline, recipient, value=eth_bought)
     log.EthPurchase(buyer, tokens_sold, eth_bought)
     return tokens_sold
 
-# @notice Convert Tokens (self.token) to Tokens (token_addr).
-# @dev User specifies maximum input and exact output.
-# @param tokens_bought Amount of Tokens (token_addr) bought.
-# @param max_tokens_sold Maximum Tokens (self.token) sold.
-# @param max_eth_sold Maximum ETH purchased as intermediary.
-# @param deadline Time after which this transaction can no longer be executed.
-# @param token_addr The address of the token being purchased.
-# @return Amount of Tokens (self.token) sold.
+# 根据指定的token 地址和指定购买的目标token数量，将本合约的token兑换成token_addr的token
 @public
 def tokenToTokenSwapOutput(tokens_bought: uint256, max_tokens_sold: uint256, max_eth_sold: uint256(wei), deadline: timestamp, token_addr: address) -> uint256:
     exchange_addr: address = self.factory.getExchange(token_addr)
     return self.tokenToTokenOutput(tokens_bought, max_tokens_sold, max_eth_sold, deadline, msg.sender, msg.sender, exchange_addr)
 
-# @notice Convert Tokens (self.token) to Tokens (token_addr) and transfers
-#         Tokens (token_addr) to recipient.
-# @dev User specifies maximum input and exact output.
-# @param tokens_bought Amount of Tokens (token_addr) bought.
-# @param max_tokens_sold Maximum Tokens (self.token) sold.
-# @param max_eth_sold Maximum ETH purchased as intermediary.
-# @param deadline Time after which this transaction can no longer be executed.
-# @param recipient The address that receives output ETH.
-# @param token_addr The address of the token being purchased.
-# @return Amount of Tokens (self.token) sold.
+# 根据指定的token 地址和指定购买的目标token数量，将本合约的token兑换成token_addr的token，并转给指定地址
 @public
 def tokenToTokenTransferOutput(tokens_bought: uint256, max_tokens_sold: uint256, max_eth_sold: uint256(wei), deadline: timestamp, recipient: address, token_addr: address) -> uint256:
     exchange_addr: address = self.factory.getExchange(token_addr)
     return self.tokenToTokenOutput(tokens_bought, max_tokens_sold, max_eth_sold, deadline, msg.sender, recipient, exchange_addr)
 
-# @notice Convert Tokens (self.token) to Tokens (exchange_addr.token).
-# @dev Allows trades through contracts that were not deployed from the same factory.
-# @dev User specifies exact input and minimum output.
-# @param tokens_sold Amount of Tokens sold.
-# @param min_tokens_bought Minimum Tokens (token_addr) purchased.
-# @param min_eth_bought Minimum ETH purchased as intermediary.
-# @param deadline Time after which this transaction can no longer be executed.
-# @param exchange_addr The address of the exchange for the token being purchased.
-# @return Amount of Tokens (exchange_addr.token) bought.
+# 指定最小ETH购买数量，Token -> Token 的兑换
 @public
 def tokenToExchangeSwapInput(tokens_sold: uint256, min_tokens_bought: uint256, min_eth_bought: uint256(wei), deadline: timestamp, exchange_addr: address) -> uint256:
     return self.tokenToTokenInput(tokens_sold, min_tokens_bought, min_eth_bought, deadline, msg.sender, msg.sender, exchange_addr)
 
-# @notice Convert Tokens (self.token) to Tokens (exchange_addr.token) and transfers
-#         Tokens (exchange_addr.token) to recipient.
-# @dev Allows trades through contracts that were not deployed from the same factory.
-# @dev User specifies exact input and minimum output.
-# @param tokens_sold Amount of Tokens sold.
-# @param min_tokens_bought Minimum Tokens (token_addr) purchased.
-# @param min_eth_bought Minimum ETH purchased as intermediary.
-# @param deadline Time after which this transaction can no longer be executed.
-# @param recipient The address that receives output ETH.
-# @param exchange_addr The address of the exchange for the token being purchased.
-# @return Amount of Tokens (exchange_addr.token) bought.
+# 指定最小ETH购买数量，Token -> Token 的兑换，并转给指定地址
 @public
 def tokenToExchangeTransferInput(tokens_sold: uint256, min_tokens_bought: uint256, min_eth_bought: uint256(wei), deadline: timestamp, recipient: address, exchange_addr: address) -> uint256:
     assert recipient != self
     return self.tokenToTokenInput(tokens_sold, min_tokens_bought, min_eth_bought, deadline, msg.sender, recipient, exchange_addr)
 
-# @notice Convert Tokens (self.token) to Tokens (exchange_addr.token).
-# @dev Allows trades through contracts that were not deployed from the same factory.
-# @dev User specifies maximum input and exact output.
-# @param tokens_bought Amount of Tokens (token_addr) bought.
-# @param max_tokens_sold Maximum Tokens (self.token) sold.
-# @param max_eth_sold Maximum ETH purchased as intermediary.
-# @param deadline Time after which this transaction can no longer be executed.
-# @param exchange_addr The address of the exchange for the token being purchased.
-# @return Amount of Tokens (self.token) sold.
+# 指定最小ETH卖出数量，Token -> Token 的兑换
 @public
 def tokenToExchangeSwapOutput(tokens_bought: uint256, max_tokens_sold: uint256, max_eth_sold: uint256(wei), deadline: timestamp, exchange_addr: address) -> uint256:
     return self.tokenToTokenOutput(tokens_bought, max_tokens_sold, max_eth_sold, deadline, msg.sender, msg.sender, exchange_addr)
 
-# @notice Convert Tokens (self.token) to Tokens (exchange_addr.token) and transfers
-#         Tokens (exchange_addr.token) to recipient.
-# @dev Allows trades through contracts that were not deployed from the same factory.
-# @dev User specifies maximum input and exact output.
-# @param tokens_bought Amount of Tokens (token_addr) bought.
-# @param max_tokens_sold Maximum Tokens (self.token) sold.
-# @param max_eth_sold Maximum ETH purchased as intermediary.
-# @param deadline Time after which this transaction can no longer be executed.
-# @param recipient The address that receives output ETH.
-# @param token_addr The address of the token being purchased.
-# @return Amount of Tokens (self.token) sold.
+# 指定最小ETH卖出数量，Token -> Token 的兑换，并转给指定地址
 @public
 def tokenToExchangeTransferOutput(tokens_bought: uint256, max_tokens_sold: uint256, max_eth_sold: uint256(wei), deadline: timestamp, recipient: address, exchange_addr: address) -> uint256:
     assert recipient != self
     return self.tokenToTokenOutput(tokens_bought, max_tokens_sold, max_eth_sold, deadline, msg.sender, recipient, exchange_addr)
 
-# @notice Public price function for ETH to Token trades with an exact input.
-# @param eth_sold Amount of ETH sold.
-# @return Amount of Tokens that can be bought with input ETH.
+# 根据指定卖出的ETH数量计算可以交易到的Token数量
 @public
 @constant
 def getEthToTokenInputPrice(eth_sold: uint256(wei)) -> uint256:
@@ -496,9 +468,7 @@ def getEthToTokenInputPrice(eth_sold: uint256(wei)) -> uint256:
     token_reserve: uint256 = self.token.balanceOf(self)
     return self.getInputPrice(as_unitless_number(eth_sold), as_unitless_number(self.balance), token_reserve)
 
-# @notice Public price function for ETH to Token trades with an exact output.
-# @param tokens_bought Amount of Tokens bought.
-# @return Amount of ETH needed to buy output Tokens.
+# 根据指定卖出的Token数量计算可以交易到的ETH数量
 @public
 @constant
 def getEthToTokenOutputPrice(tokens_bought: uint256) -> uint256(wei):
@@ -507,9 +477,7 @@ def getEthToTokenOutputPrice(tokens_bought: uint256) -> uint256(wei):
     eth_sold: uint256 = self.getOutputPrice(tokens_bought, as_unitless_number(self.balance), token_reserve)
     return as_wei_value(eth_sold, 'wei')
 
-# @notice Public price function for Token to ETH trades with an exact input.
-# @param tokens_sold Amount of Tokens sold.
-# @return Amount of ETH that can be bought with input Tokens.
+# 根据指定卖出的Token数量计算可以交易到的ETH数量
 @public
 @constant
 def getTokenToEthInputPrice(tokens_sold: uint256) -> uint256(wei):
@@ -518,9 +486,7 @@ def getTokenToEthInputPrice(tokens_sold: uint256) -> uint256(wei):
     eth_bought: uint256 = self.getInputPrice(tokens_sold, token_reserve, as_unitless_number(self.balance))
     return as_wei_value(eth_bought, 'wei')
 
-# @notice Public price function for Token to ETH trades with an exact output.
-# @param eth_bought Amount of output ETH.
-# @return Amount of Tokens needed to buy output ETH.
+# 根据指定卖出的ETH数量计算可以交易到的Token数量
 @public
 @constant
 def getTokenToEthOutputPrice(eth_bought: uint256(wei)) -> uint256:
