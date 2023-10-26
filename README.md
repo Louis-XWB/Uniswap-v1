@@ -70,9 +70,28 @@ Uniswap V1 是该协议的第一个版本，于 2018 年 11 月推出，设计�
 
 ### [uniswap_exchange.vy](https://github.com/Louis-XWB/Uniswap-v1/blob/master/contracts/uniswap_exchange.vy)
 
-* [addLiquidity](https://github.com/Louis-XWB/Uniswap-v1/blob/4804e4e3c3a430e53fa5ce19ff89c54cfaa1a35b/contracts/uniswap_exchange.vy#L59)
+* [addLiquidity](https://github.com/Louis-XWB/Uniswap-v1/blob/1b7be3470830b30881076a6f0dacad0718863935/contracts/uniswap_exchange.vy#L70)
 
-* [removeLiquidity](https://github.com/Louis-XWB/Uniswap-v1/blob/4804e4e3c3a430e53fa5ce19ff89c54cfaa1a35b/contracts/uniswap_exchange.vy#L142)
+* [removeLiquidity](https://github.com/Louis-XWB/Uniswap-v1/blob/1b7be3470830b30881076a6f0dacad0718863935/contracts/uniswap_exchange.vy#L142)
+
+* [getInputPrice](https://github.com/Louis-XWB/Uniswap-v1/blob/1b7be3470830b30881076a6f0dacad0718863935/contracts/uniswap_exchange.vy#L194)
+
+* [getOutputPrice](https://github.com/Louis-XWB/Uniswap-v1/blob/1b7be3470830b30881076a6f0dacad0718863935/contracts/uniswap_exchange.vy#L215)
+
+* [ethToTokenInput](https://github.com/Louis-XWB/Uniswap-v1/blob/1b7be3470830b30881076a6f0dacad0718863935/contracts/uniswap_exchange.vy#L223)
+
+* [ethToTokenOutput](https://github.com/Louis-XWB/Uniswap-v1/blob/1b7be3470830b30881076a6f0dacad0718863935/contracts/uniswap_exchange.vy#L262C5-L262C21)
+
+* [tokenToEthInput](https://github.com/Louis-XWB/Uniswap-v1/blob/1b7be3470830b30881076a6f0dacad0718863935/contracts/uniswap_exchange.vy#L301)
+
+* [tokenToEthOutput](https://github.com/Louis-XWB/Uniswap-v1/blob/1b7be3470830b30881076a6f0dacad0718863935/contracts/uniswap_exchange.vy#L333C5-L333C21)
+
+* [tokenToTokenInput](https://github.com/Louis-XWB/Uniswap-v1/blob/1b7be3470830b30881076a6f0dacad0718863935/contracts/uniswap_exchange.vy#L367)
+
+* [tokenToTokenOutput](https://github.com/Louis-XWB/Uniswap-v1/blob/1b7be3470830b30881076a6f0dacad0718863935/contracts/uniswap_exchange.vy#L402)
+
+
+
 
 
 ## FAQ
