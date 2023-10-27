@@ -67,7 +67,7 @@ Uniswap V1 是该协议的第一个版本，于 2018 年 11 月推出，设计�
 
 ## Code Learning
 
-### [uniswap_exchange.vy](https://github.com/Louis-XWB/Uniswap-v1/blob/master/contracts/uniswap_exchange.vy)
+### [uniswap_exchange.vy](https://github.com/Louis-XWB/Uniswap-v1/blob/learn_v/contracts/uniswap_exchange.vy)
 
 * [addLiquidity](https://github.com/Louis-XWB/Uniswap-v1/blob/1b7be3470830b30881076a6f0dacad0718863935/contracts/uniswap_exchange.vy#L70)
 
@@ -90,7 +90,9 @@ Uniswap V1 是该协议的第一个版本，于 2018 年 11 月推出，设计�
 * [tokenToTokenOutput](https://github.com/Louis-XWB/Uniswap-v1/blob/1b7be3470830b30881076a6f0dacad0718863935/contracts/uniswap_exchange.vy#L402)
 
 
+### [uniswap_factory.vy](https://github.com/Louis-XWB/Uniswap-v1/blob/learn_v/contracts/uniswap_factory.vy)
 
+* [createExchange](https://github.com/Louis-XWB/Uniswap-v1/blob/ed757a3fdeee7178155e98c672437879123cf001/contracts/uniswap_factory.vy#L22)
 
 
 ## FAQ
